@@ -69,6 +69,19 @@ if (outcome === 'release-age-failure-then-success') {
     process.exit(1)
   }
 }
+if (outcome === 'invalid-dep-name-then-success') {
+  const countFile = process.env.FAKE_NPX_COUNT
+  const count = countFile && existsSync(countFile) ? Number(readFileSync(countFile, 'utf8')) : 0
+  if (countFile) writeFileSync(countFile, String(count + 1))
+  // pnpm refuses the whole manifest while a malformed name is present; the
+  // manager is expected to prune such rows and retry exactly once.
+  const manifest = JSON.parse(readFileSync('./package.json', 'utf8'))
+  const names = Object.keys(manifest.dependencies ?? {})
+  if (names.some((name) => name.split('/').some((part) => /^[._]/.test(part)))) {
+    writeSync(2, 'ERR_PNPM_INVALID_DEPENDENCY_NAME The current package contains a dependency with an invalid name: @dsh-external/.runtime')
+    process.exit(1)
+  }
+}
 process.exit(0)
 `
 }

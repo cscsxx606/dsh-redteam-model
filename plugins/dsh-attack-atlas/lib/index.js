@@ -20,7 +20,7 @@ import { TAXONOMIES, ATLAS_MODES, locate } from "./taxonomy.js";
 import { validateMethod, methodRunMessage, inferTargetKind, METHOD_LIMITS } from "./method.js";
 
 const name = "dsh-attack-atlas";
-const inject = ["tools", "webServer", "webRuntime", "agentPresets"];
+const inject = ["tools", "webServer", "agentPresets"];
 
 const ROUTE_PATH = "/dsh-attack-atlas";
 /** 进程级 CSRF token：GET <route>/csrf 由同源页取走（跨源响应不可读），POST 须回带 x-dsh-csrf 头。 */
@@ -1230,7 +1230,7 @@ function apply(ctx) {
 
 	//#region Web 通道路由（自注册 + 同源栅栏）
 	const trustedHosts = () => {
-		try { return ctx.webRuntime?.trustedHosts ?? []; } catch { return []; }
+		try { return []; } catch { return []; } // dsh >= 0.2.1 removed webRuntime; loopback-only trust.
 	};
 	ctx.effect(() => ctx.webServer.register({
 		kind: "prefix",

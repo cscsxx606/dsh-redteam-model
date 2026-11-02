@@ -255,6 +255,29 @@ test('Manager reports a resolved settings write that did not persist', async () 
 
 const READY_SNAPSHOT = { status: 'ready', value: { ...DEFAULT_VISIBILITY }, writable: true, mode: 'host' }
 
+test('Plugins page lists bridge/link planes as skipped instead of installable rows', async () => {
+  const manager = await renderManager(READY_SNAPSHOT, {
+    ...STATUS,
+    skippedPlugins: [
+      { name: '.runtime', reason: 'runtime-bridge' },
+      { name: 'node_modules', reason: 'no-package-json' },
+    ],
+  })
+  try {
+    manager.openPlugins()
+    const note = manager.renderer.root.findByProps({ role: 'note' })
+    const text = note.children.filter(child => typeof child === 'string').join(' ')
+    assert.match(text, /\.runtime/)
+    assert.match(text, /node_modules/)
+    // Only the real plugin keeps a row: no install toggle for the skipped planes.
+    const labels = manager.renderer.root.findAllByProps({ role: 'switch' }).map(node => node.props['aria-label'])
+    assert.equal(labels.includes('.runtime: Enabled in current profile'), false)
+    assert.equal(labels.includes('node_modules: Enabled in current profile'), false)
+  } finally {
+    await manager.cleanup()
+  }
+})
+
 function modeFixture(linkState, id) {
   return {
     id,

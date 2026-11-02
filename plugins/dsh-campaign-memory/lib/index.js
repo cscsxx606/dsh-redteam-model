@@ -19,7 +19,7 @@ import { defineTool } from "@deepseek-ai/dsh-tools";
 import { openStore, writeMemory, searchMemories, topForInjection, listMemories, getMemory, removeMemory, statsMemories, purgeExpired, kindLabel, MEMORY_KINDS } from "./store.js";
 
 const name = "dsh-campaign-memory";
-const inject = ["tools", "webServer", "webRuntime", "agentPresets", "systemPrompt"];
+const inject = ["tools", "webServer", "agentPresets", "systemPrompt"];
 
 export const MODE_IDS = ["redteam", "pentest", "code-audit", "binary-analysis", "attack-defense", "av-evasion", "incident-response", "cloud-security", "ctf-solver", "asset-mapping"];
 const MODE_LABELS = {
@@ -315,7 +315,7 @@ function apply(ctx) {
 
 	//#region Web 通道路由（自注册 + 同源栅栏）
 	const trustedHosts = () => {
-		try { return ctx.webRuntime?.trustedHosts ?? []; } catch { return []; }
+		try { return []; } catch { return []; } // dsh >= 0.2.1 removed webRuntime; loopback-only trust.
 	};
 	ctx.effect(() => ctx.webServer.register({
 		kind: "prefix",

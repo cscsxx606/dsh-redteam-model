@@ -70,6 +70,8 @@ export interface ModeDescriptor {
 
 interface ProfilePackage {
   dependencies?: Record<string, string>
+  /** Host-supplied packages linked plugins import; the host routes these to its own copies. */
+  peerDependencies?: Record<string, string>
   dsh?: { profile?: { bundles?: string[] } }
 }
 
@@ -150,6 +152,87 @@ function titleFromDir(name: string): string {
     .join(' ')
 }
 
+/**
+ * List `<root>/plugins` entries that are not runtime plugins.
+ *
+ * `plugins/node_modules` is pnpm's link plane; `plugins/.runtime` is the bare
+ * dependency bridge a source-tree deploy creates. Neither is a plugin: the
+ * link plane has no package.json, and the bridge's package.json is a private
+ * `dsh-runtime-bridge` marker. Reporting them here keeps the settings page
+ * from offering an install that can only fail (`@dsh-external/<dir>` is not a
+ * package name, so pnpm rejects it with ERR_PNPM_INVALID_DEPENDENCY_NAME).
+ */
+export function scanSkippedPluginEntries(root = locateRoot()): { name: string; reason: 'no-package-json' | 'runtime-bridge' }[] {
+  const pluginsRoot = path.join(root, 'plugins')
+  if (!existsSync(pluginsRoot)) return []
+  return readdirSync(pluginsRoot, { withFileTypes: true })
+    .filter(entry => entry.isDirectory())
+    .map(entry => entry.name)
+    .filter(name => !isRuntimePluginDir(path.join(pluginsRoot, name)))
+    .sort()
+    .map(name => ({
+      name,
+      reason: readJsonFile(path.join(pluginsRoot, name, 'package.json')) === null
+        ? 'no-package-json' as const
+        : 'runtime-bridge' as const,
+    }))
+}
+
+/** True when a `plugins/` subdirectory is a real plugin package. */
+function isRuntimePluginDir(dir: string): boolean {
+  const raw = readJsonFile(path.join(dir, 'package.json')) as Record<string, unknown> | null
+  if (raw === null) return false
+  return raw.name !== 'dsh-runtime-bridge'
+}
+
+/**
+ * Peer names the running installation supplies to linked plugins.
+ *
+ * A linked plugin's bare `@deepseek-ai/*` import is routed to the host's own
+ * copy only when the profile manifest declares that name in its
+ * `peerDependencies` (the host's linked-root interception keys off the profile
+ * manifest). Without the row, the loader falls back to plain Node resolution,
+ * which from a `link:`ed plugin cannot see the host's module tree — the plugin
+ * then fails to load. `dsh-tools` is host-supplied and has no profile-level
+ * copy on 0.2 hosts, so it always belongs in the list.
+ */
+export function requiredProfilePeers(root = locateRoot()): string[] {
+  const names = new Set<string>(['@deepseek-ai/dsh-tools'])
+  const pluginsRoot = path.join(root, 'plugins')
+  if (existsSync(pluginsRoot)) {
+    for (const plugin of scanPlugins(root)) {
+      const raw = readJsonFile(path.join(plugin.dir, 'package.json')) as Record<string, unknown> | null
+      const peers = raw?.peerDependencies
+      if (typeof peers !== 'object' || peers === null) continue
+      for (const name of Object.keys(peers)) {
+        // Host-provided services only (dsh-tools, dsh-agent-presets, ...). The
+        // host cannot supply its own package or standalone libraries; listing
+        // those would be a phantom row the linked root never routes.
+        if (!name.startsWith('@deepseek-ai/') || name === '@deepseek-ai/cordis') continue
+        names.add(name)
+      }
+    }
+  }
+  return [...names].sort()
+}
+
+/** Add the host-supplied peers this tree needs to the profile manifest. */
+export function ensureProfilePeers(root = locateRoot()): string | null {
+  const profile = readProfile()
+  if (profile === null) return null
+  const peers = { ...(profile.peerDependencies ?? {}) }
+  const added: string[] = []
+  for (const name of requiredProfilePeers(root)) {
+    if (peers[name] !== undefined) continue
+    peers[name] = '*'
+    added.push(name)
+  }
+  if (added.length === 0) return null
+  profile.peerDependencies = peers
+  writeProfileWithBackup(profile)
+  return `declared profile peers: ${added.join(', ')}`
+}
+
 /** Scan each <root>/plugins subdirectory's package.json. Returns descriptors sorted by name. */
 export function scanPlugins(root = locateRoot()): PluginDescriptor[] {
   const pluginsRoot = path.join(root, 'plugins')
@@ -157,7 +240,7 @@ export function scanPlugins(root = locateRoot()): PluginDescriptor[] {
   const names = readdirSync(pluginsRoot, { withFileTypes: true })
     .filter(entry => entry.isDirectory())
     .map(entry => entry.name)
-    .filter(name => existsSync(path.join(pluginsRoot, name, 'package.json')))
+    .filter(name => isRuntimePluginDir(path.join(pluginsRoot, name)))
     .sort()
   return names.map((name) => {
     const dir = path.join(pluginsRoot, name)
@@ -616,6 +699,7 @@ function buildStatus(operations: readonly OperationRecord[] = [], root = locateR
     },
     modes,
     plugins,
+    skippedPlugins: scanSkippedPluginEntries(root),
     operations: [...operations],
   }
 }
@@ -737,6 +821,58 @@ function normalizeAllowBuilds(profileWeb: string): boolean {
   return true
 }
 
+/**
+ * npm's package-name rule, applied to one dependency field entry.
+ *
+ * A name must be a single token or `@scope/name` of URL-friendly characters
+ * and may not start with `.` or `_` (nor be reserved like `node_modules`).
+ */
+function isValidDependencyName(name: string): boolean {
+  if (name === '' || name === 'node_modules' || name === 'favicon.ico') return false
+  const body = name.startsWith('@') ? name.slice(1).split('/') : [name]
+  if (body.length === 0 || body.length > 2) return false
+  if (body.length === 2 && (body[0] === '' || body[1] === '')) return false
+  return body.every(part => /^[a-z0-9-~][a-z0-9-._~]*$/.test(part))
+}
+
+/**
+ * Drop dependency fields whose name pnpm rejects outright.
+ *
+ * `ERR_PNPM_INVALID_DEPENDENCY_NAME` fails the whole install, so one leftover
+ * row — classically `@dsh-external/.runtime`, written when something offered
+ * the `plugins/.runtime` bridge as a plugin — blocks every install from the
+ * settings page. The manager never writes such a row; removing what it finds
+ * restores the invariant. Bundles naming the same row are dropped with it.
+ * @param profileWeb - profile directory holding the manifest.
+ * @returns the dependency names removed, empty when the manifest was clean.
+ */
+function pruneInvalidProfileDependencies(profileWeb: string): string[] {
+  const file = path.join(profileWeb, 'package.json')
+  const raw = readJsonFile(file) as Record<string, unknown> | null
+  if (typeof raw !== 'object' || raw === null) return []
+  const removed: string[] = []
+  for (const field of ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies', 'peerDependenciesMeta'] as const) {
+    const value = raw[field]
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) continue
+    const rows = value as Record<string, unknown>
+    for (const name of Object.keys(rows)) {
+      if (isValidDependencyName(name)) continue
+      delete rows[name]
+      removed.push(`${field.split('Dependencies')[0]}:${name}`)
+    }
+  }
+  const bundles = (raw.dsh as { profile?: { bundles?: unknown } } | undefined)?.profile?.bundles
+  if (Array.isArray(bundles)) {
+    const kept = bundles.filter((entry: unknown) => typeof entry !== 'string' || isValidDependencyName(entry))
+    if (kept.length !== bundles.length) {
+      ;((raw.dsh as { profile?: { bundles?: unknown } }).profile as { bundles: unknown[] }).bundles = kept
+    }
+  }
+  if (removed.length === 0) return []
+  writeProfileWithBackup(raw as ProfilePackage)
+  return removed
+}
+
 async function runPnpmInstall(cwd: string, onProgress?: ProgressCallback): Promise<void> {
   if (normalizeAllowBuilds(cwd)) onProgress?.('normalised allowBuilds entries in pnpm-workspace.yaml', 45)
   onProgress?.('running pnpm install', 50)
@@ -759,6 +895,29 @@ async function runPnpmInstall(cwd: string, onProgress?: ProgressCallback): Promi
   }
   if (result.code !== 0) {
     const combined = `${result.stdout}\n${result.stderr}`
+    // pnpm refuses the whole manifest over one malformed dependency name. The
+    // usual cause is a helper directory under plugins/ (`.runtime`, ...) that
+    // some other installer offered as `@dsh-external/.runtime`; every row this
+    // manager writes is `@dsh-external/<plugin dir>` and is always a valid
+    // name, so a malformed one means a stale foreign row. Prune it and retry
+    // once instead of leaving the settings page with an install nobody can run.
+    if (/(?:^|[^A-Za-z0-9_])ERR_PNPM_INVALID_DEPENDENCY_NAME(?![A-Za-z0-9_])/.test(combined)) {
+      const pruned = pruneInvalidProfileDependencies(cwd)
+      if (pruned.length > 0) {
+        onProgress?.(`dropped malformed profile dependency rows: ${pruned.join(', ')}`, 55)
+        result = await runOnce()
+      }
+    }
+  }
+  if (result.code !== 0) {
+    const combined = `${result.stdout}\n${result.stderr}`
+    if (/(?:^|[^A-Za-z0-9_])ERR_PNPM_INVALID_DEPENDENCY_NAME(?![A-Za-z0-9_])/.test(combined)) {
+      throw new Error([
+        `pnpm install failed: the profile carries a dependency whose name is not a valid package name (ERR_PNPM_INVALID_DEPENDENCY_NAME; launcher: ${pnpm.source}).`,
+        `Check ${path.join(cwd, 'package.json')} for names with a leading "." or "_" (for example "@dsh-external/.runtime");`,
+        'helper directories under plugins/ are not installable plugins.',
+      ].join('\n'))
+    }
     if (/(?:^|[^A-Za-z0-9_])ERR_PNPM_IGNORED_BUILDS(?![A-Za-z0-9_])/.test(combined)) {
       // pnpm's own hint ("run pnpm approve-builds") cannot work in the link:
       // profile layout — point at the file and the values that unblock it.
@@ -1598,6 +1757,10 @@ export async function installOne(name: string, options: InstallOptions = {}, roo
     const pkg = pluginDependencyName(plugin)
     profile.dependencies ??= {}
     profile.dependencies[pkg] = `link:${plugin.dir}`
+    profile.peerDependencies ??= {}
+    for (const peer of requiredProfilePeers(root)) {
+      if (profile.peerDependencies[peer] === undefined) profile.peerDependencies[peer] = '*'
+    }
     normalizeBundle(profile, plugin)
     if (snapshots[0].existed) writeProfileWithBackup(profile)
     else atomicWriteJson(profilePackageFile(), profile)

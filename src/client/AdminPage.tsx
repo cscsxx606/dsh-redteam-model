@@ -348,6 +348,7 @@ export function createAdminPage(face: AdminFace, t: Translate, visibilityScope: 
 
               <PluginSection
                 plugins={status.plugins}
+                skipped={status.skippedPlugins}
                 t={t}
                 busy={busy}
                 pending={pending}

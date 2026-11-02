@@ -33,6 +33,12 @@ export interface ModeStatus {
   readonly ready: boolean
 }
 
+/** A `plugins/` subdirectory that is not a runtime plugin (link or bridge plane). */
+export interface SkippedPluginEntry {
+  readonly name: string
+  readonly reason: 'no-package-json' | 'runtime-bridge'
+}
+
 export interface PluginStatus {
   readonly name: string
   readonly title: string
@@ -57,6 +63,8 @@ export interface AdminStatus {
   readonly summary: AdminSummary
   readonly modes: readonly ModeStatus[]
   readonly plugins: readonly PluginStatus[]
+  /** Non-plugin directories the scan walked past, reported instead of hidden. */
+  readonly skippedPlugins?: readonly SkippedPluginEntry[]
   readonly operations: readonly OperationRecord[]
 }
 

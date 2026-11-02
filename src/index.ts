@@ -15,7 +15,7 @@ import {
   effectiveConversationViewSettings,
   registerConversationViewSettings,
 } from './conversationViewSettings.ts'
-import { activeProfile, deployGlobalAgents, deployModes, dshHome, getStatus, healPresetPlanePlugins, installOne, profileWebDir, reconcileProfileBundles, repairMode, scanModes, scanPlugins, uninstallModes, uninstallOne } from './manager.ts'
+import { activeProfile, deployGlobalAgents, deployModes, dshHome, ensureProfilePeers, getStatus, healPresetPlanePlugins, installOne, profileWebDir, reconcileProfileBundles, repairMode, scanModes, scanPlugins, scanSkippedPluginEntries, uninstallModes, uninstallOne } from './manager.ts'
 import { detectEngineFlavor, isPackagedDesktopHost, normalizePresetComposition } from './manager.ts'
 import { ENGINE_PACKAGES, NORMALIZER_VERSION, rewriteCompositionText } from './normalize.ts'
 import { OperationQueue } from './operations.ts'
@@ -23,7 +23,7 @@ import { registerModelRpc } from './rpc.ts'
 import type { HostConnectionHandle } from './types.ts'
 
 export { OperationQueue }
-export { activeProfile, deployGlobalAgents, deployModes, dshHome, getStatus, healPresetPlanePlugins, installOne, profileWebDir, reconcileProfileBundles, repairMode, scanModes, scanPlugins, uninstallModes, uninstallOne }
+export { activeProfile, deployGlobalAgents, deployModes, dshHome, ensureProfilePeers, getStatus, healPresetPlanePlugins, installOne, profileWebDir, reconcileProfileBundles, repairMode, requiredProfilePeers, scanModes, scanPlugins, scanSkippedPluginEntries, uninstallModes, uninstallOne } from './manager.ts'
 export { detectEngineFlavor, isPackagedDesktopHost, normalizePresetComposition }
 export { ENGINE_PACKAGES, NORMALIZER_VERSION, rewriteCompositionText }
 export { registerModelRpc }
@@ -64,6 +64,16 @@ export function apply(ctx: HostContext): void {
   }
   try {
     reconcileProfileBundles()
+  } catch {
+    /* getStatus reports the profile state to the settings page instead. */
+  }
+  try {
+    // Linked plugins import host-supplied packages (@deepseek-ai/dsh-tools,
+    // schemastery, ...). The host only routes those imports when the profile
+    // manifest declares them as peers; without the rows they load as plain
+    // Node resolutions from a `link:`ed tree and fail. Safe to run on every
+    // boot: it writes nothing once the rows exist.
+    ensureProfilePeers()
   } catch {
     /* getStatus reports the profile state to the settings page instead. */
   }

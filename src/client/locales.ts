@@ -62,6 +62,7 @@ const en = {
 
   pluginsTitle: 'Runtime plugins',
   pluginsEmpty: 'No plugins reported by the host.',
+  pluginsSkipped: 'Not runtime plugins (bridge/link planes — the manager never installs these)',
   pluginStateNotInstalled: 'not installed',
   pluginStateInstalled: 'installed',
   pluginStateUpdateAvailable: 'update available',
@@ -179,6 +180,7 @@ export const zh: Record<LocaleKey, string> = {
 
   pluginsTitle: '运行时插件',
   pluginsEmpty: '宿主未上报任何插件。',
+  pluginsSkipped: '非运行时插件（桥接/链接平面，管理台不会安装或更新它们）',
   pluginStateNotInstalled: '未安装',
   pluginStateInstalled: '已安装',
   pluginStateUpdateAvailable: '可更新',
