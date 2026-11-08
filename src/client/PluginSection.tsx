@@ -1,7 +1,7 @@
 /** Plugin rows: install state, description, versions, and per-row actions. */
 import { Button, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
 import { IconCordisPlugin } from './iconCompat.js'
-import type { PluginInstallState, PluginStatus, Translate } from './contracts.js'
+import type { PluginInstallState, PluginStatus, SkippedPluginEntry, Translate } from './contracts.js'
 import {
   VIEW_FIELD_BY_PLUGIN,
   type ConversationViewField,
@@ -40,6 +40,7 @@ function conversationViewField(plugin: PluginStatus): ConversationViewField | un
 
 export function PluginSection({
   plugins,
+  skipped = [],
   t,
   busy,
   pending,
@@ -52,6 +53,7 @@ export function PluginSection({
   onRepair,
 }: {
   plugins: PluginStatus[]
+  skipped?: SkippedPluginEntry[]
   t: Translate
   busy: boolean
   pending: boolean
@@ -173,6 +175,11 @@ export function PluginSection({
               )
             })}
           </div>
+        )}
+        {skipped.length > 0 && (
+          <p className="dsh-rtm-empty dsh-rtm-skipped" role="note">
+            {`${t('pluginsSkipped')}: ${skipped.map(entry => `plugins/${entry.name}`).join(', ')}`}
+          </p>
         )}
       </section>
     </>

@@ -5,7 +5,7 @@ import { syncBuiltinESMExports } from 'node:module'
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { activeProfile, deployModes, dshHome, getStatus, healPresetPlanePlugins, installOne, reconcileProfileBundles, repairMode, scanModes, scanPlugins, uninstallModes, uninstallOne } from '../lib/index.js'
+import { activeProfile, deployModes, dshHome, ensureProfilePeers, getStatus, healPresetPlanePlugins, installOne, reconcileProfileBundles, repairMode, requiredProfilePeers, scanModes, scanPlugins, scanSkippedPluginEntries, uninstallModes, uninstallOne } from '../lib/index.js'
 import { createManagerFixture } from './helpers/fixture.mjs'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -17,6 +17,50 @@ test('scanPlugins discovers all 17 sub-plugins with correct planes', () => {
   for (const plugin of plugins) {
     assert.match(plugin.name, /^dsh-[a-z0-9-]+$/)
     assert.notEqual(plugin.version, '0.0.0')
+  }
+})
+
+test('the peer bridge plane is reported as skipped, never as an installable plugin', () => {
+  // A source-tree deploy creates plugins/.runtime (a `dsh-runtime-bridge`
+  // package). It must not become a plugin row: installing it would ask pnpm
+  // for "@dsh-external/.runtime", which is not a package name.
+  const skipped = scanSkippedPluginEntries(repoRoot)
+  const names = skipped.map(entry => entry.name)
+  assert.equal(names.includes('node_modules'), true)
+  assert.equal(skipped.find(entry => entry.name === 'node_modules')?.reason, 'no-package-json')
+  if (existsSync(path.join(repoRoot, 'plugins', '.runtime'))) {
+    assert.equal(names.includes('.runtime'), true)
+    assert.equal(skipped.find(entry => entry.name === '.runtime')?.reason, 'runtime-bridge')
+    assert.equal(scanPlugins(repoRoot).some(plugin => plugin.name === '.runtime'), false)
+  }
+})
+
+test('the profile declares the host-supplied peers linked plugins import', () => {
+  // The host routes a linked plugin's @deepseek-ai/* import to its own copy only
+  // when the profile manifest lists the name as a peer; dsh-tools is never a
+  // profile dependency on 0.2 hosts, so it must always be declared.
+  const peers = requiredProfilePeers(repoRoot)
+  assert.equal(peers.includes('@deepseek-ai/dsh-tools'), true)
+  assert.equal(peers.includes('@deepseek-ai/dsh-agent-presets'), true)
+  // Standalone libraries are not host services and are never declared.
+  assert.equal(peers.includes('@deepseek-ai/schemastery'), false)
+  assert.equal(peers.includes('@deepseek-ai/cordis'), false)
+
+  const previousHome = process.env.DSH_HOME
+  const isolatedHome = mkdtempSync(path.join(tmpdir(), 'dsh-redteam-model-test-'))
+  process.env.DSH_HOME = isolatedHome
+  try {
+    mkdirSync(path.join(isolatedHome, 'profiles', 'web'), { recursive: true })
+    writeFileSync(path.join(isolatedHome, 'profiles', 'web', 'package.json'), JSON.stringify({ name: 'dsh-profile-web', private: true, dependencies: {} }))
+    assert.match(ensureProfilePeers(repoRoot) ?? '', /declared profile peers/)
+    const written = JSON.parse(readFileSync(path.join(isolatedHome, 'profiles', 'web', 'package.json'), 'utf8'))
+    assert.equal(written.peerDependencies['@deepseek-ai/dsh-tools'], '*')
+    // Idempotent: a second run finds the rows already present.
+    assert.equal(ensureProfilePeers(repoRoot), null)
+  } finally {
+    if (previousHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previousHome
+    rmSync(isolatedHome, { recursive: true, force: true })
   }
 })
 
@@ -724,6 +768,47 @@ test('a foreign .agent-presets symlink is reported and never removed', { skip: p
     assert.match(detail, /skipped foreign agent presets link/)
     assert.equal(lstatSync(fixture.presets).isSymbolicLink(), true)
     assert.equal(existsSync(other), true)
+  } finally {
+    fixture.cleanup()
+  }
+})
+
+test('install prunes a malformed dependency row and retries instead of failing', async () => {
+  // A stale `@dsh-external/.runtime` row (the plugins/.runtime bridge offered
+  // as a plugin) makes pnpm reject the whole manifest. The manager never
+  // writes such a name, so it prunes the row and retries once.
+  const fixture = createManagerFixture({ plugins: ['dsh-hunter'], npx: 'invalid-dep-name-then-success' })
+  try {
+    const manifest = JSON.parse(readFileSync(fixture.profilePackage, 'utf8'))
+    manifest.dependencies['@dsh-external/.runtime'] = 'link:/tmp/plugins/.runtime'
+    manifest.dependencies['@dsh-external/_bridge'] = 'link:/tmp/plugins/_bridge'
+    manifest.dsh.profile.bundles.push('@dsh-external/.runtime')
+    writeFileSync(fixture.profilePackage, JSON.stringify(manifest, null, 2), 'utf8')
+
+    await installOne('dsh-hunter', {}, fixture.root)
+
+    const written = JSON.parse(readFileSync(fixture.profilePackage, 'utf8'))
+    assert.equal(written.dependencies['@dsh-external/.runtime'], undefined)
+    assert.equal(written.dependencies['@dsh-external/_bridge'], undefined)
+    assert.equal(written.dependencies['@dsh-external/dsh-hunter'], `link:${path.join(fixture.root, 'plugins', 'dsh-hunter')}`)
+    assert.equal(written.dsh.profile.bundles.includes('@dsh-external/.runtime'), false)
+    // One failed run, one pruned retry.
+    assert.equal(fixture.npxCalls().length, 2)
+  } finally {
+    fixture.cleanup()
+  }
+})
+
+test('a retry blocked by an unrelated pnpm error still surfaces that error', async () => {
+  const fixture = createManagerFixture({
+    plugins: ['dsh-hunter'],
+    npx: 'generic-failure',
+    stderr: 'ERR_PNPM_INVALID_DEPENDENCY_NAME leftover',
+  })
+  try {
+    await assert.rejects(installOne('dsh-hunter', {}, fixture.root), /ERR_PNPM_INVALID_DEPENDENCY_NAME/)
+    // No malformed row existed to prune, so the run is not retried.
+    assert.equal(fixture.npxCalls().length, 1)
   } finally {
     fixture.cleanup()
   }

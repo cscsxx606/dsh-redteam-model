@@ -1,0 +1,11 @@
+{
+	"name": "@dsh-external/redteam-plugins",
+	"private": true,
+	"description": "Peer declarations for the redteam plugin tree. Linked (out-of-profile) bundles resolve these peers through dsh's linked-root route: each name listed here is intercepted to the running installation's copy, so plugins share one instance with the host instead of a stale copy under profiles/*/node_modules.",
+	"peerDependencies": {
+		"@deepseek-ai/dsh-mcp-client": "*",
+		"@deepseek-ai/dsh-settings": "*",
+		"@deepseek-ai/dsh-tools": "*",
+		"@deepseek-ai/schemastery": "*"
+	}
+}

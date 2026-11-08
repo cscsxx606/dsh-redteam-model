@@ -3,3 +3,5 @@ node_modules/
 .DS_Store
 .zcode/
 *.log
+plugins/.runtime/
+lib/*.bak-*

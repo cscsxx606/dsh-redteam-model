@@ -19,7 +19,7 @@ import { defineTool } from "@deepseek-ai/dsh-tools";
 import { openStore, registerFinding, updateFinding, removeFinding, getFinding, listFindings, listFindingsAll, groupByTarget, groupByTargetAll, computeStats, computeStatsAll, modeCounts, modeCountsAll, ledgerOverview, ledgerOverviewAll, getMeta, setMeta, SEVERITIES, STATUSES, MODE_STATUSES, ALL_STATUSES, EVIDENCE_LEVELS, SOURCE_ORIGINS, statusesOf } from "./store.js";
 
 const name = "dsh-redteam-results";
-const inject = ["tools", "webServer", "webRuntime", "agentPresets"];
+const inject = ["tools", "webServer", "agentPresets"];
 
 const ROUTE_PATH = "/dsh-redteam-results";
 /** 进程级 CSRF token：GET <route>/csrf 由同源页取走（跨源响应不可读），POST 须回带 x-dsh-csrf 头。 */
@@ -429,7 +429,7 @@ function apply(ctx) {
 
 	//#region Web 通道路由（better-sidebar 同款：webServer 自注册 + 同源栅栏）
 	const trustedHosts = () => {
-		try { return ctx.webRuntime?.trustedHosts ?? []; } catch { return []; }
+		try { return []; } catch { return []; } // dsh >= 0.2.1 removed webRuntime; loopback-only trust.
 	};
 	ctx.effect(() => ctx.webServer.register({
 		kind: "prefix",

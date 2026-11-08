@@ -48,6 +48,11 @@ export type PluginInstallState = 'not-installed' | 'installed' | 'update-availab
 
 export type PluginMountPlane = 'host' | 'preset'
 
+export interface SkippedPluginEntry {
+  name: string
+  reason: 'no-package-json' | 'runtime-bridge'
+}
+
 export interface PluginStatus {
   name: string
   title: string
@@ -76,6 +81,7 @@ export interface AdminStatus {
   summary: AdminSummary
   modes: ModeStatus[]
   plugins: PluginStatus[]
+  skippedPlugins?: SkippedPluginEntry[]
   operations: OperationRecord[]
 }
 

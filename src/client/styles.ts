@@ -89,6 +89,7 @@ const CSS_TEXT = String.raw`
 .dsh-rtm-actions{display:flex;gap:8px;flex-wrap:wrap}
 .dsh-rtm-muted{color:var(--dsw-alias-label-tertiary,#8a919f);font-size:10.5px;line-height:16px}
 .dsh-rtm-empty{padding:16px;color:var(--dsw-alias-label-tertiary,#8a919f);font-size:11.5px;text-align:center}
+.dsh-rtm-skipped{margin:8px 0 0;padding:10px 12px;text-align:left;line-height:1.5;border-top:1px dashed var(--dsw-alias-border-secondary,rgba(255,255,255,.1))}
 
 /* ---- plugins ---- */
 .dsh-rtm-plugins{display:flex;flex-direction:column}

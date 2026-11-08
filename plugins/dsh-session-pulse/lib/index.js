@@ -13,7 +13,7 @@ import zlib from "node:zlib";
 import { PULSE_MODES, parseTranscript } from "./pulse.js";
 
 const name = "dsh-session-pulse";
-const inject = ["webServer", "webRuntime", "agentPresets"];
+const inject = ["webServer", "agentPresets"];
 
 const ROUTE_PATH = "/dsh-session-pulse";
 /** 进程级 CSRF token：GET <route>/csrf 由同源页取走（跨源响应不可读），POST 须回带 x-dsh-csrf 头。 */
@@ -117,7 +117,7 @@ export async function dispatch(ctx, endpoint, payload) {
 
 function apply(ctx) {
 	const trustedHosts = () => {
-		try { return ctx.webRuntime?.trustedHosts ?? []; } catch { return []; }
+		try { return []; } catch { return []; } // dsh >= 0.2.1 removed webRuntime; loopback-only trust.
 	};
 	ctx.effect(() => ctx.webServer.register({
 		kind: "prefix",
